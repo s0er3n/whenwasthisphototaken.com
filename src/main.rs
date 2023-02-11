@@ -1,7 +1,10 @@
 use std::collections::HashMap;
+use std::fs;
 use std::sync::Arc;
 
-use serde::Serialize;
+use rand::prelude::*;
+
+use serde::{Deserialize, Serialize};
 use serde_json;
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::RwLock;
@@ -12,8 +15,28 @@ use twitch_irc::TwitchIRCClient;
 use twitch_irc::{ClientConfig, SecureTCPTransport};
 
 use futures_util::{SinkExt, StreamExt};
+use std::f64::consts::E;
 use warp::ws::{Message, WebSocket};
 use warp::Filter;
+
+static MIN_YEAR: f64 = 1900.;
+static MAX_YEAR: f64 = 2023.;
+
+fn calculate_score(real_year: f64, guessed_year: f64) -> f64 {
+    5000.0 * f64::exp(-f64::abs(real_year - guessed_year) as f64 / (MAX_YEAR - MIN_YEAR) as f64)
+}
+fn combine_hash_maps(maps: &Vec<HashMap<String, f64>>) -> Vec<(String, f64)> {
+    let mut result = HashMap::new();
+    for map in maps {
+        for (key, value) in map {
+            *result.entry(key.to_owned()).or_default() += value.clone();
+        }
+    }
+    // TODO: sort
+    let mut res: Vec<(String, f64)> = result.into_iter().collect();
+    res.sort_by_key(|k| k.1 as usize);
+    res
+}
 
 struct Server {
     // string -> channel
@@ -58,7 +81,9 @@ impl Game {
 
     fn add_guess(&mut self, user: String, year: u16) -> Result<(), ()> {
         if let Some(image) = self.images.get_mut(self.i as usize) {
-            image.guesses.insert(user, year);
+            image.guesses.insert(user.clone(), year);
+            let score = calculate_score(image.result.into(), year.into());
+            image.scores.insert(user, score);
             Ok(())
         } else {
             println!("couldnt get images as mut");
@@ -68,19 +93,18 @@ impl Game {
 
     fn next(&mut self) -> Option<Self> {
         match self.state {
-            GameState::AfterImage => {
-                self.state = GameState::Image;
-                self.i += 1;
-                return None;
-            }
-            GameState::Image => match self.images.get(self.i as usize + 1) {
+            GameState::AfterImage => match self.images.get(self.i as usize + 1) {
                 Some(_) => {
-                    self.state = GameState::AfterImage;
+                    self.state = GameState::Image;
+                    self.i += 1;
                 }
-                _ => {
+                None => {
                     self.state = GameState::Results;
                 }
             },
+            GameState::Image => {
+                self.state = GameState::AfterImage;
+            }
             GameState::Results => return Some(Self::new()),
         }
         None
@@ -99,10 +123,25 @@ impl Game {
                 guesses: self.images[self.i as usize].create_vec_guesses(),
                 description: self.images[self.i as usize].description.clone(),
                 result: self.images[self.i as usize].result.clone(),
+                scores: self.images[self.i as usize]
+                    .scores
+                    .clone()
+                    .into_iter()
+                    // TODO: sort
+                    .collect(),
                 pos: self.i as usize + 1,
                 len: self.images.len(),
             },
-            GameState::Results => StateMsg::Results {},
+            GameState::Results => StateMsg::Results {
+                scores: combine_hash_maps(
+                    &self
+                        .images
+                        .iter()
+                        // probably avoidable clone
+                        .map(|image| image.scores.clone())
+                        .collect(),
+                ),
+            },
         };
         serde_json::to_string(&message).unwrap()
     }
@@ -123,10 +162,12 @@ enum StateMsg {
         result: u16,
         pos: usize,
         len: usize,
+        scores: Vec<(String, f64)>,
         // TODO: add scoreboard or winners
     },
     Results {
         // TODO: scoreboard winner etc
+        scores: Vec<(String, f64)>,
     },
 }
 
@@ -137,20 +178,23 @@ struct Image {
     description: String,
     // string -> sender
     guesses: HashMap<String, u16>,
+    scores: HashMap<String, f64>,
 }
 
 impl Image {
     fn random_image() -> Self {
+        let (result, url) = get_random_image();
         Self {
-            url: "not implemented".to_owned(),
-            result: 1999,
+            url,
+            result,
             description: "description".to_owned(),
             guesses: HashMap::new(),
+            scores: HashMap::new(),
         }
     }
     fn create_vec_guesses(&self) -> Vec<u16> {
         // 123 years
-        let mut res = vec![0; 123];
+        let mut res = vec![0; 124];
 
         for guess in self.guesses.values() {
             // starting at 1900
@@ -162,43 +206,47 @@ impl Image {
     }
 }
 
-async fn handle_year_msg(message: &PrivmsgMessage, server: &mut Server, sub: Arc<RwLock<Sub>>) {
+async fn handle_year_msg(
+    message: &PrivmsgMessage,
+    server: Arc<RwLock<Server>>,
+    sub: Arc<RwLock<Sub>>,
+) {
     if message.message_text.len() >= 4 {
         if let Ok(year) = message.message_text.parse::<u16>() {
             if 1900 <= year && year <= 2023 {
-                if let Some(game) = server.games.get_mut(&message.channel_login) {
+                if let Some(game) = server.write().await.games.get_mut(&message.channel_login) {
                     if let GameState::Image = game.state {
                         let res = game.add_guess(message.sender.name.clone(), year);
                         if res.is_err() {
                             println!("couldnt guess");
                         }
-                        dbg!(&year);
                         sub.read()
                             .await
                             .send_message(game.to_message(), message.channel_login.clone());
-                        dbg!(&year);
                     }
                 }
             }
         }
     }
 }
-async fn handle_next(message: &PrivmsgMessage, server: &mut Server, sub: Arc<RwLock<Sub>>) {
+async fn handle_next(message: &PrivmsgMessage, server: Arc<RwLock<Server>>, sub: Arc<RwLock<Sub>>) {
     if message.message_text.starts_with("!next")
         && message.channel_login == message.sender.name.to_lowercase()
     {
+        let mut server = server.write().await;
         if let Some(game) = server.games.get_mut(&message.channel_login) {
             if let Some(game) = game.next() {
                 server.games.insert(message.channel_login.clone(), game);
-                sub.read().await.send_message(
-                    server
-                        .games
-                        .get(&message.channel_login)
-                        .unwrap()
-                        .to_message(),
-                    message.channel_login.clone(),
-                );
             }
+            let msg = server
+                .games
+                .get(&message.channel_login)
+                .unwrap()
+                .to_message();
+
+            sub.read()
+                .await
+                .send_message(msg, message.channel_login.clone());
         }
     }
 }
@@ -228,8 +276,7 @@ impl Sub {
 
     fn send_message(&self, msg: String, channel: String) {
         self.listeners.get(&channel).unwrap().iter().for_each(|rx| {
-            dbg!("sending stuff");
-            rx.send(msg.clone()).unwrap();
+            let _ = rx.send(msg.clone());
         });
     }
 }
@@ -241,7 +288,7 @@ pub async fn main() {
     let (mut incoming_messages, client) =
         TwitchIRCClient::<SecureTCPTransport, StaticLoginCredentials>::new(config);
 
-    let mut server = Server::new();
+    let mut server = Arc::new(RwLock::new(Server::new()));
 
     let sub = Sub::new(client);
     // join a channel
@@ -250,30 +297,34 @@ pub async fn main() {
     // error with `unwrap`.
     // client.join("soeren_______".to_owned()).unwrap();
 
-    // server.games.insert("soeren_______".to_owned(), Game::new());
     // first thing you should do: start consuming incoming messages,
     // otherwise they will back up.
     {
         let sub = sub.clone();
+        let server = server.clone();
         let join_handle = tokio::spawn(async move {
             while let Some(message) = incoming_messages.recv().await {
                 if let twitch_irc::message::ServerMessage::Privmsg(message) = message {
-                    dbg!(&message);
-                    handle_year_msg(&message, &mut server, sub.clone()).await;
-                    handle_next(&message, &mut server, sub.clone()).await;
+                    handle_next(&message, server.clone(), sub.clone()).await;
+                    handle_year_msg(&message, server.clone(), sub.clone()).await;
                 }
             }
         });
     }
 
     let sub = warp::any().map(move || sub.clone());
+    let server = warp::any().map(move || server.clone());
     let chat = warp::path("ws")
         .and(warp::path::param::<String>())
         .and(warp::ws())
         .and(sub)
+        .and(server)
         .map(
-            move |channel: String, ws: warp::ws::Ws, sub: Arc<RwLock<Sub>>| {
-                ws.on_upgrade(move |socket| user_connected(channel, socket, sub))
+            move |channel: String,
+                  ws: warp::ws::Ws,
+                  sub: Arc<RwLock<Sub>>,
+                  server: Arc<RwLock<Server>>| {
+                ws.on_upgrade(move |socket| user_connected(channel, socket, sub, server))
             },
         );
 
@@ -282,17 +333,48 @@ pub async fn main() {
     // If you return instead of waiting the background task will exit.
 }
 
-async fn user_connected(channel: String, socket: WebSocket, sub: Arc<RwLock<Sub>>) {
+async fn user_connected(
+    channel: String,
+    socket: WebSocket,
+    sub: Arc<RwLock<Sub>>,
+    server: Arc<RwLock<Server>>,
+) {
     let (tx, mut rx) = mpsc::unbounded_channel();
-    {
-        sub.write().await.subscribe(channel, tx);
-    }
     let (mut user_ws_tx, user_ws_rx) = socket.split();
+    {
+        sub.write().await.subscribe(channel.clone(), tx);
+        let msg = server
+            .write()
+            .await
+            .games
+            .entry(channel)
+            .or_insert_with(|| Game::new())
+            .to_message();
+
+        let _ = user_ws_tx.send(Message::text(msg)).await;
+    }
 
     dbg!("user connected");
     let join_handle = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            user_ws_tx.send(Message::text(msg)).await.unwrap();
+            dbg!(&msg);
+            let _ = user_ws_tx.send(Message::text(msg)).await;
         }
     });
+}
+fn get_random_image() -> (u16, String) {
+    let file = fs::read_to_string("./images.txt").unwrap();
+    let year_photos: std::collections::HashMap<u16, Vec<String>> =
+        serde_json::from_str(&file).unwrap();
+
+    let mut rng = rand::thread_rng();
+    let random_year: u16 = rng.gen_range(1900..2023);
+    let photos = year_photos.get(&random_year).unwrap();
+    let photo_index: usize = rng.gen_range(0..photos.len());
+
+    let result = (
+        random_year,
+        format!("https://{}", photos[photo_index].clone()),
+    );
+    result
 }

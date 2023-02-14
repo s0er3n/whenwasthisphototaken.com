@@ -328,7 +328,7 @@ pub async fn main() {
             },
         );
 
-    warp::serve(chat).run(([127, 0, 0, 1], 3030)).await;
+    warp::serve(chat).run(([0, 0, 0, 0], 3030)).await;
     // keep the tokio executor alive.
     // If you return instead of waiting the background task will exit.
 }

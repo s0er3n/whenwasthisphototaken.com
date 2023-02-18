@@ -363,7 +363,7 @@ pub async fn main() {
                 ws.on_upgrade(move |socket| user_connected(channel, socket, sub, server))
             },
         );
-    let cors = warp::cors().allow_origin("*").allow_methods(vec!["POST"]);
+    let cors = warp::cors().allow_any_origin().allow_methods(vec!["POST"]);
     let pool = Arc::new(RwLock::new(pool));
     let get_pool = warp::any().map(move || pool.clone());
     let add_image = warp::path("image")

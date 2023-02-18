@@ -6,6 +6,8 @@ use rand::prelude::*;
 
 use serde::{Deserialize, Serialize};
 use serde_json;
+use sqlx::query::Query;
+use sqlx::{MySql, Pool};
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::RwLock;
 use twitch_irc::login::StaticLoginCredentials;
@@ -17,8 +19,9 @@ use twitch_irc::{ClientConfig, SecureTCPTransport};
 use futures_util::{SinkExt, StreamExt};
 use std::f64::consts::E;
 use warp::ws::{Message, WebSocket};
-use warp::Filter;
+use warp::{Filter, Rejection, Reply};
 
+use sqlx::mysql::{MySqlArguments, MySqlPoolOptions};
 use tokio::time::{sleep, Duration};
 
 static MIN_YEAR: f64 = 1900.;
@@ -278,19 +281,57 @@ impl Sub {
     }
 }
 
+#[derive(Deserialize)]
+struct ImageEntity {
+    year: u16,
+    url: String,
+    description: String,
+    tags: String,
+}
+
+impl<'a> ImageEntity {
+    fn to_insert_query(self) -> Query<'a, MySql, MySqlArguments> {
+        sqlx::query!(
+            "
+                INSERT INTO images (year, url, description, tags) VAlUES (?, ?, ?, ?);
+            ",
+            self.year,
+            self.url,
+            self.description,
+            self.tags
+        )
+    }
+}
+
 #[tokio::main]
 pub async fn main() {
+    dotenv::dotenv().ok();
+
+    let pool = MySqlPoolOptions::new()
+        .max_connections(5)
+        .connect(&std::env::var("DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+
+    let create_db = sqlx::query!(
+        "
+            CREATE TABLE IF NOT EXISTS images (image_id Integer NOT NULL AUTO_INCREMENT, PRIMARY KEY(image_id),year Integer, url Text, description Text, tags Text, allowed bool not null default 0);
+        "
+    );
+
+    create_db.execute(&pool).await.unwrap();
+
     let config = ClientConfig::default();
     let (mut incoming_messages, client) =
         TwitchIRCClient::<SecureTCPTransport, StaticLoginCredentials>::new(config);
 
-    let mut server = Arc::new(RwLock::new(Server::new()));
+    let server = Arc::new(RwLock::new(Server::new()));
 
     let sub = Sub::new(client);
     {
         let sub = sub.clone();
         let server = server.clone();
-        let join_handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             while let Some(message) = incoming_messages.recv().await {
                 if let twitch_irc::message::ServerMessage::Privmsg(message) = message {
                     handle_year_msg(
@@ -323,9 +364,40 @@ pub async fn main() {
             },
         );
 
-    warp::serve(chat).run(([0, 0, 0, 0], 3030)).await;
+    let pool = Arc::new(RwLock::new(pool));
+    let get_pool = warp::any().map(move || pool.clone());
+    let add_image = warp::path("image")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(get_pool)
+        .and_then(|image: ImageEntity, pool: Arc<RwLock<Pool<MySql>>>| async {
+            insert(image, pool).await
+        });
+    let routes = chat.or(add_image);
+
+    warp::serve(routes)
+        .run((
+            [0, 0, 0, 0],
+            std::env::var("PORT")
+                .expect("no port")
+                .parse::<u16>()
+                .unwrap(),
+        ))
+        .await;
     // keep the tokio executor alive.
     // If you return instead of waiting the background task will exit.
+}
+
+async fn insert(
+    image: ImageEntity,
+    pool: Arc<RwLock<Pool<MySql>>>,
+) -> Result<impl Reply, Rejection> {
+    let query = image.to_insert_query();
+    let pool = pool.read().await;
+    match query.execute(&*pool).await {
+        Ok(_) => Ok(warp::reply()),
+        Err(_) => Err(warp::reject()),
+    }
 }
 
 async fn user_connected(
@@ -391,7 +463,7 @@ async fn user_connected(
     let server = server.clone();
     let channel = channel.clone();
     let sub = sub.clone();
-    let join_handle = tokio::spawn(async move {
+    tokio::spawn(async move {
         while let Some(Ok(ws_msg)) = user_ws_rx.next().await {
             if ws_msg.is_text() {
                 let msg = ws_msg.to_str().unwrap().to_owned();
@@ -412,7 +484,7 @@ async fn user_connected(
         }
     });
     dbg!("user connected");
-    let join_handle = tokio::spawn(async move {
+    tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             let _ = user_ws_tx.send(Message::text(msg)).await;
         }

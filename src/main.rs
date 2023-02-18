@@ -19,6 +19,8 @@ use std::f64::consts::E;
 use warp::ws::{Message, WebSocket};
 use warp::Filter;
 
+use tokio::time::{sleep, Duration};
+
 static MIN_YEAR: f64 = 1900.;
 static MAX_YEAR: f64 = 2023.;
 
@@ -32,7 +34,6 @@ fn combine_hash_maps(maps: &Vec<HashMap<String, f64>>) -> Vec<(String, f64)> {
             *result.entry(key.to_owned()).or_default() += value.clone();
         }
     }
-    // TODO: sort
     let mut res: Vec<(String, f64)> = result.into_iter().collect();
     res.sort_by_key(|k| k.1 as usize);
     res
@@ -51,7 +52,7 @@ impl Server {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum GameState {
     Image,
     AfterImage,
@@ -127,7 +128,6 @@ impl Game {
                     .scores
                     .clone()
                     .into_iter()
-                    // TODO: sort
                     .collect(),
                 pos: self.i as usize + 1,
                 len: self.images.len(),
@@ -207,47 +207,44 @@ impl Image {
 }
 
 async fn handle_year_msg(
-    message: &PrivmsgMessage,
+    user_name: String,
+    channel: String,
+    message: String,
     server: Arc<RwLock<Server>>,
     sub: Arc<RwLock<Sub>>,
+    twitch: bool,
 ) {
-    if message.message_text.len() >= 4 {
-        if let Ok(year) = message.message_text.parse::<u16>() {
-            if 1900 <= year && year <= 2023 {
-                if let Some(game) = server.write().await.games.get_mut(&message.channel_login) {
-                    if let GameState::Image = game.state {
-                        let res = game.add_guess(message.sender.name.clone(), year);
-                        if res.is_err() {
-                            println!("couldnt guess");
-                        }
-                        sub.read()
-                            .await
-                            .send_message(game.to_message(), message.channel_login.clone());
+    dbg!(&user_name, &channel, &message);
+    if let Ok(year) = message.parse::<u16>() {
+        if 1900 <= year && year <= 2023 {
+            if let Some(game) = server.write().await.games.get_mut(&channel) {
+                if let GameState::Image = game.state {
+                    let user_name = if twitch {
+                        format!("{user_name} (twitch)")
+                    } else {
+                        user_name
+                    };
+                    let res = game.add_guess(user_name, year);
+                    if res.is_err() {
+                        println!("couldnt guess");
                     }
+                    sub.read()
+                        .await
+                        .send_message(game.to_message(), channel.clone());
                 }
             }
         }
     }
 }
-async fn handle_next(message: &PrivmsgMessage, server: Arc<RwLock<Server>>, sub: Arc<RwLock<Sub>>) {
-    if message.message_text.starts_with("!next")
-        && message.channel_login == message.sender.name.to_lowercase()
-    {
-        let mut server = server.write().await;
-        if let Some(game) = server.games.get_mut(&message.channel_login) {
-            if let Some(game) = game.next() {
-                server.games.insert(message.channel_login.clone(), game);
-            }
-            let msg = server
-                .games
-                .get(&message.channel_login)
-                .unwrap()
-                .to_message();
-
-            sub.read()
-                .await
-                .send_message(msg, message.channel_login.clone());
+async fn handle_next(channel: String, server: Arc<RwLock<Server>>, sub: Arc<RwLock<Sub>>) {
+    let mut server = server.write().await;
+    if let Some(game) = server.games.get_mut(&channel) {
+        if let Some(game) = game.next() {
+            server.games.insert(channel.clone(), game);
         }
+        let msg = server.games.get(&channel).unwrap().to_message();
+
+        sub.read().await.send_message(msg, channel.clone());
     }
 }
 
@@ -283,7 +280,6 @@ impl Sub {
 
 #[tokio::main]
 pub async fn main() {
-    // default configuration is to join chat as anonymous.
     let config = ClientConfig::default();
     let (mut incoming_messages, client) =
         TwitchIRCClient::<SecureTCPTransport, StaticLoginCredentials>::new(config);
@@ -291,22 +287,21 @@ pub async fn main() {
     let mut server = Arc::new(RwLock::new(Server::new()));
 
     let sub = Sub::new(client);
-    // join a channel
-    // This function only returns an error if the passed channel login name is malformed,
-    // so in this simple case where the channel name is hardcoded we can ignore the potential
-    // error with `unwrap`.
-    // client.join("soeren_______".to_owned()).unwrap();
-
-    // first thing you should do: start consuming incoming messages,
-    // otherwise they will back up.
     {
         let sub = sub.clone();
         let server = server.clone();
         let join_handle = tokio::spawn(async move {
             while let Some(message) = incoming_messages.recv().await {
                 if let twitch_irc::message::ServerMessage::Privmsg(message) = message {
-                    handle_next(&message, server.clone(), sub.clone()).await;
-                    handle_year_msg(&message, server.clone(), sub.clone()).await;
+                    handle_year_msg(
+                        message.sender.name,
+                        message.channel_login,
+                        message.message_text,
+                        server.clone(),
+                        sub.clone(),
+                        true,
+                    )
+                    .await;
                 }
             }
         });
@@ -340,24 +335,85 @@ async fn user_connected(
     server: Arc<RwLock<Server>>,
 ) {
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let (mut user_ws_tx, user_ws_rx) = socket.split();
+    let (mut user_ws_tx, mut user_ws_rx) = socket.split();
     {
         sub.write().await.subscribe(channel.clone(), tx);
+
+        if let None = server.read().await.games.get(&channel) {
+            let server = server.clone();
+            let channel = channel.clone();
+            let sub = sub.clone();
+            tokio::spawn(async move {
+                loop {
+                    // keep this line its useful until  LUL
+                    sleep(Duration::from_secs(3)).await;
+
+                    let state = server
+                        .read()
+                        .await
+                        .games
+                        .get(&channel)
+                        .unwrap()
+                        .state
+                        .clone();
+                    match state {
+                        GameState::Image => {
+                            sleep(Duration::from_secs(40)).await;
+                        }
+                        GameState::AfterImage => {
+                            sleep(Duration::from_secs(5)).await;
+                        }
+                        GameState::Results => {
+                            sleep(Duration::from_secs(30)).await;
+                        }
+                    }
+                    println!("30 seconds over");
+                    match server.write().await.games.get_mut(&channel) {
+                        Some(_) => {}
+                        None => break,
+                    };
+                    handle_next(channel.clone(), server.clone(), sub.clone()).await;
+                }
+            });
+        }
+
         let msg = server
             .write()
             .await
             .games
-            .entry(channel)
+            .entry(channel.clone())
             .or_insert_with(|| Game::new())
             .to_message();
 
         let _ = user_ws_tx.send(Message::text(msg)).await;
     }
 
+    let server = server.clone();
+    let channel = channel.clone();
+    let sub = sub.clone();
+    let join_handle = tokio::spawn(async move {
+        while let Some(Ok(ws_msg)) = user_ws_rx.next().await {
+            if ws_msg.is_text() {
+                let msg = ws_msg.to_str().unwrap().to_owned();
+                let mut msg_split = msg.split(";");
+                let (user_name, guess) = (msg_split.next().unwrap(), msg_split.next().unwrap());
+                println!("{user_name}, {guess}");
+
+                handle_year_msg(
+                    user_name.to_owned(),
+                    channel.clone(),
+                    guess.to_owned(),
+                    server.clone(),
+                    sub.clone(),
+                    false,
+                )
+                .await;
+            }
+        }
+    });
     dbg!("user connected");
     let join_handle = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            dbg!(&msg);
             let _ = user_ws_tx.send(Message::text(msg)).await;
         }
     });

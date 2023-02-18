@@ -363,7 +363,7 @@ pub async fn main() {
                 ws.on_upgrade(move |socket| user_connected(channel, socket, sub, server))
             },
         );
-
+    let cors = warp::cors().allow_origin("*").allow_methods(vec!["POST"]);
     let pool = Arc::new(RwLock::new(pool));
     let get_pool = warp::any().map(move || pool.clone());
     let add_image = warp::path("image")
@@ -372,7 +372,8 @@ pub async fn main() {
         .and(get_pool)
         .and_then(|image: ImageEntity, pool: Arc<RwLock<Pool<MySql>>>| async {
             insert(image, pool).await
-        });
+        })
+        .with(cors);
     let routes = chat.or(add_image);
 
     warp::serve(routes)

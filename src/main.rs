@@ -18,6 +18,7 @@ use twitch_irc::{ClientConfig, SecureTCPTransport};
 
 use futures_util::{SinkExt, StreamExt};
 use std::f64::consts::E;
+use warp::hyper::Method;
 use warp::ws::{Message, WebSocket};
 use warp::{Filter, Rejection, Reply};
 
@@ -368,8 +369,8 @@ pub async fn main() {
 
     let cors = warp::cors()
         .allow_any_origin()
-        .allow_header("content-type")
-        .allow_methods(vec!["POST"]);
+        .allow_methods(&[Method::POST])
+        .allow_header("content-type");
     let add_image = warp::path("image")
         .and(warp::post())
         .and(warp::body::json())

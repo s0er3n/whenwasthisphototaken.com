@@ -368,14 +368,6 @@ pub async fn main() {
 
     let cors = warp::cors()
         .allow_any_origin()
-        .allow_headers(vec![
-            "User-Agent",
-            "Sec-Fetch-Mode",
-            "Referer",
-            "Origin",
-            "Access-Control-Request-Method",
-            "Access-Control-Request-Headers",
-        ])
         .allow_header("content-type")
         .allow_methods(vec!["POST"]);
     let add_image = warp::path("image")

@@ -363,6 +363,9 @@ pub async fn main() {
                 ws.on_upgrade(move |socket| user_connected(channel, socket, sub, server))
             },
         );
+    let pool = Arc::new(RwLock::new(pool));
+    let get_pool = warp::any().map(move || pool.clone());
+
     let cors = warp::cors()
         .allow_any_origin()
         .allow_headers(vec![
@@ -373,9 +376,8 @@ pub async fn main() {
             "Access-Control-Request-Method",
             "Access-Control-Request-Headers",
         ])
+        .allow_header("content-type")
         .allow_methods(vec!["POST"]);
-    let pool = Arc::new(RwLock::new(pool));
-    let get_pool = warp::any().map(move || pool.clone());
     let add_image = warp::path("image")
         .and(warp::post())
         .and(warp::body::json())
@@ -405,6 +407,7 @@ async fn insert(
 ) -> Result<impl Reply, Rejection> {
     let query = image.to_insert_query();
     let pool = pool.read().await;
+
     match query.execute(&*pool).await {
         Ok(_) => Ok(warp::reply()),
         Err(_) => Err(warp::reject()),

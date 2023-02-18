@@ -376,9 +376,8 @@ pub async fn main() {
         .and(get_pool)
         .and_then(|image: ImageEntity, pool: Arc<RwLock<Pool<MySql>>>| async {
             insert(image, pool).await
-        })
-        .with(cors);
-    let routes = chat.or(add_image);
+        });
+    let routes = chat.or(add_image).with(cors);
 
     warp::serve(routes)
         .run((

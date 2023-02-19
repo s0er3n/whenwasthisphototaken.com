@@ -367,18 +367,17 @@ pub async fn main() {
     let pool = Arc::new(RwLock::new(pool));
     let get_pool = warp::any().map(move || pool.clone());
 
-    let cors = warp::cors()
-        .allow_any_origin()
-        .allow_methods(&[Method::POST])
-        .allow_header("content-type");
+    // .allow_methods(&[Method::POST])
+    // .allow_header("content-type");
     let add_image = warp::path("image")
         .and(warp::post())
         .and(warp::body::json())
         .and(get_pool)
         .and_then(|image: ImageEntity, pool: Arc<RwLock<Pool<MySql>>>| async {
             insert(image, pool).await
-        });
-    let routes = chat.or(add_image).with(cors);
+        })
+        .map(|reply| warp::reply::with_header(reply, "Access-Control-Allow-Origin", "*"));
+    let routes = chat.or(add_image);
 
     warp::serve(routes)
         .run((

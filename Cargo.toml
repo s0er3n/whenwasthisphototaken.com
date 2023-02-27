@@ -14,7 +14,9 @@ tokio = { version = "1.25.0", features = ["full"] }
 twitch-irc = "5.0.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "*"
-rand = "*"
+rand = {version = '*', features = ['std_rng']}
 dotenv = "*"
 sqlx = { version = "0.6", features = [ "runtime-tokio-native-tls" , "mysql", "macros" ] }
 anyhow = "*"
+aws-sdk-s3 = "0.24.0"
+aws-config = "0.54.1"

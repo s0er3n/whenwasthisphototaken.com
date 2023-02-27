@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fs;
 use std::sync::Arc;
 
 use rand::prelude::*;
@@ -70,15 +69,16 @@ struct Game {
 }
 
 impl Game {
-    fn new() -> Self {
+    async fn new(pool: &Pool<MySql>) -> Self {
+        let mut images = vec![];
+        for _ in 0..=5 {
+            let pool = pool.clone();
+            {
+                images.push(Image::random_image(&pool).await);
+            }
+        }
         Self {
-            images: vec![
-                Image::random_image(),
-                Image::random_image(),
-                Image::random_image(),
-                Image::random_image(),
-                Image::random_image(),
-            ],
+            images,
             state: GameState::Image,
             i: 0,
         }
@@ -96,7 +96,7 @@ impl Game {
         }
     }
 
-    fn next(&mut self) -> Option<Self> {
+    async fn next(&mut self, pool: &Pool<MySql>) -> Option<Self> {
         match self.state {
             GameState::AfterImage => match self.images.get(self.i as usize + 1) {
                 Some(_) => {
@@ -110,7 +110,7 @@ impl Game {
             GameState::Image => {
                 self.state = GameState::AfterImage;
             }
-            GameState::Results => return Some(Self::new()),
+            GameState::Results => return Some(Self::new(pool).await),
         }
         None
     }
@@ -186,12 +186,12 @@ struct Image {
 }
 
 impl Image {
-    fn random_image() -> Self {
-        let (result, url) = get_random_image();
+    async fn random_image(pool: &Pool<MySql>) -> Self {
+        let image = get_random_image(pool).await;
         Self {
-            url,
-            result,
-            description: "description".to_owned(),
+            url: image.url,
+            result: image.year,
+            description: image.description,
             guesses: HashMap::new(),
             scores: HashMap::new(),
         }
@@ -240,10 +240,15 @@ async fn handle_year_msg(
         }
     }
 }
-async fn handle_next(channel: String, server: Arc<RwLock<Server>>, sub: Arc<RwLock<Sub>>) {
+async fn handle_next(
+    channel: String,
+    server: Arc<RwLock<Server>>,
+    sub: Arc<RwLock<Sub>>,
+    pool: &Pool<MySql>,
+) {
     let mut server = server.write().await;
     if let Some(game) = server.games.get_mut(&channel) {
-        if let Some(game) = game.next() {
+        if let Some(game) = game.next(pool).await {
             server.games.insert(channel.clone(), game);
         }
         let msg = server.games.get(&channel).unwrap().to_message();
@@ -307,6 +312,12 @@ impl<'a> ImageEntity {
 #[tokio::main]
 pub async fn main() {
     dotenv::dotenv().ok();
+    // let region_provider = RegionProviderChain::default_provider().or_else("eu-central-1");
+    // let config = aws_config::from_env().region(region_provider).load().await;
+    //
+    // let client = s3::Client::new(&config);
+    //
+    // println!("{:?}", client.list_buckets().send().await);
 
     let pool = MySqlPoolOptions::new()
         .max_connections(5)
@@ -351,39 +362,37 @@ pub async fn main() {
 
     let sub = warp::any().map(move || sub.clone());
     let server = warp::any().map(move || server.clone());
+    let pool1 = pool.clone();
+    let get_pool = warp::any().map(move || pool1.clone());
     let chat = warp::path("ws")
         .and(warp::path::param::<String>())
         .and(warp::ws())
         .and(sub)
         .and(server)
+        .and(get_pool)
         .map(
             move |channel: String,
                   ws: warp::ws::Ws,
                   sub: Arc<RwLock<Sub>>,
-                  server: Arc<RwLock<Server>>| {
-                ws.on_upgrade(move |socket| user_connected(channel, socket, sub, server))
+                  server: Arc<RwLock<Server>>,
+                  pool: Pool<MySql>| {
+                ws.on_upgrade(|socket| async move {
+                    user_connected(channel, socket, sub, server, &pool.clone()).await
+                })
             },
         );
-    let pool = Arc::new(RwLock::new(pool));
-    let get_pool = warp::any().map(move || pool.clone());
 
     let cors = warp::cors()
         .allow_any_origin()
-        .allow_headers(vec![
-            "Access-Control-Allow-Origin",
-            "Origin",
-            "Accept",
-            "X-Requested-With",
-            "Content-Type",
-        ])
-        .allow_methods(&[Method::GET, Method::POST]);
+        .allow_methods(&[Method::POST])
+        .allow_header("content-type");
+
+    let get_pool = warp::any().map(move || pool.clone());
     let add_image = warp::path("image")
-        .and(warp::post())
         .and(warp::body::json())
+        .and(warp::post())
         .and(get_pool)
-        .and_then(|image: ImageEntity, pool: Arc<RwLock<Pool<MySql>>>| async {
-            insert(image, pool).await
-        })
+        .and_then(|image: ImageEntity, pool: Pool<MySql>| async move { insert(image, &pool).await })
         .with(&cors);
     let routes = chat.or(add_image);
 
@@ -400,14 +409,10 @@ pub async fn main() {
     // If you return instead of waiting the background task will exit.
 }
 
-async fn insert(
-    image: ImageEntity,
-    pool: Arc<RwLock<Pool<MySql>>>,
-) -> Result<impl Reply, Rejection> {
+async fn insert(image: ImageEntity, pool: &Pool<MySql>) -> Result<impl Reply, Rejection> {
     let query = image.to_insert_query();
-    let pool = pool.read().await;
 
-    match query.execute(&*pool).await {
+    match query.execute(pool).await {
         Ok(_) => Ok(warp::reply()),
         Err(_) => Err(warp::reject()),
     }
@@ -418,6 +423,7 @@ async fn user_connected(
     socket: WebSocket,
     sub: Arc<RwLock<Sub>>,
     server: Arc<RwLock<Server>>,
+    pool: &Pool<MySql>,
 ) {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let (mut user_ws_tx, mut user_ws_rx) = socket.split();
@@ -428,9 +434,11 @@ async fn user_connected(
             let server = server.clone();
             let channel = channel.clone();
             let sub = sub.clone();
+            let pool = pool.clone();
             tokio::spawn(async move {
                 loop {
                     // keep this line its useful until  LUL
+                    let pool = pool.clone();
                     sleep(Duration::from_secs(3)).await;
 
                     let state = server
@@ -457,17 +465,20 @@ async fn user_connected(
                         Some(_) => {}
                         None => break,
                     };
-                    handle_next(channel.clone(), server.clone(), sub.clone()).await;
+                    handle_next(channel.clone(), server.clone(), sub.clone(), &pool).await;
                 }
             });
         }
 
+        // not sure if we really should create a new game but async closures are unstable and i am
+        // lazy
+        let new_game = Game::new(pool).await;
         let msg = server
             .write()
             .await
             .games
             .entry(channel.clone())
-            .or_insert_with(|| Game::new())
+            .or_insert(new_game)
             .to_message();
 
         let _ = user_ws_tx.send(Message::text(msg)).await;
@@ -503,19 +514,21 @@ async fn user_connected(
         }
     });
 }
-fn get_random_image() -> (u16, String) {
-    let file = fs::read_to_string("./images.txt").unwrap();
-    let year_photos: std::collections::HashMap<u16, Vec<String>> =
-        serde_json::from_str(&file).unwrap();
-
-    let mut rng = rand::thread_rng();
-    let random_year: u16 = rng.gen_range(1900..2023);
-    let photos = year_photos.get(&random_year).unwrap();
-    let photo_index: usize = rng.gen_range(0..photos.len());
-
-    let result = (
-        random_year,
-        format!("https://{}", photos[photo_index].clone()),
-    );
-    result
+async fn get_random_image(pool: &Pool<MySql>) -> ImageEntity {
+    let random_year: u16 = 1900; // rand::thread_rng().gen_range(1900..2023);
+    let res = sqlx::query!(
+        "
+     select * from images where year = (?) and allowed = 1 order by rand() limit 1;
+    ",
+        random_year
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    ImageEntity {
+        year: res.year.unwrap() as u16,
+        tags: res.tags.unwrap(),
+        description: res.description.unwrap(),
+        url: res.url.unwrap(),
+    }
 }

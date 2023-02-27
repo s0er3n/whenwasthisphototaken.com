@@ -515,7 +515,7 @@ async fn user_connected(
     });
 }
 async fn get_random_image(pool: &Pool<MySql>) -> ImageEntity {
-    let random_year: u16 = 1900; // rand::thread_rng().gen_range(1900..2023);
+    let random_year: u16 = rand::thread_rng().gen_range(1900..2023);
     let res = sqlx::query!(
         "
      select * from images where year = (?) and allowed = 1 order by rand() limit 1;

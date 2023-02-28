@@ -325,13 +325,13 @@ pub async fn main() {
         .await
         .unwrap();
 
-    let create_db = sqlx::query!(
-        "
-            CREATE TABLE IF NOT EXISTS images (image_id Integer NOT NULL AUTO_INCREMENT, PRIMARY KEY(image_id),year Integer, url Text, description Text, tags Text, allowed bool not null default 0);
-        "
-    );
-
-    create_db.execute(&pool).await.unwrap();
+    // let create_db = sqlx::query!(
+    //     "
+    //         CREATE TABLE IF NOT EXISTS images (image_id Integer NOT NULL AUTO_INCREMENT, PRIMARY KEY(image_id),year Integer, url Text, description Text, tags Text, allowed bool not null default 0);
+    //     "
+    // );
+    //
+    // create_db.execute(&pool).await.unwrap();
 
     let config = ClientConfig::default();
     let (mut incoming_messages, client) =

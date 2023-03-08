@@ -407,8 +407,6 @@ pub async fn main() {
                 .unwrap(),
         ))
         .await;
-    // keep the tokio executor alive.
-    // If you return instead of waiting the background task will exit.
 }
 
 async fn insert(image: ImageEntity, pool: &Pool<MySql>) -> Result<impl Reply, Rejection> {

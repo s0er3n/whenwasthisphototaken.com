@@ -293,18 +293,20 @@ struct ImageEntity {
     url: String,
     description: String,
     tags: String,
+    discord_name_tag: String,
 }
 
 impl<'a> ImageEntity {
     fn to_insert_query(self) -> Query<'a, MySql, MySqlArguments> {
         sqlx::query!(
             "
-                INSERT INTO images (year, url, description, tags) VAlUES (?, ?, ?, ?);
+                INSERT INTO images (year, url, description, tags, dicord_name_tag) VAlUES (?, ?, ?, ?, ?);
             ",
             self.year,
             self.url,
             self.description,
-            self.tags
+            self.tags,
+            self.discord_name_tag
         )
     }
 }
@@ -530,5 +532,6 @@ async fn get_random_image(pool: &Pool<MySql>) -> ImageEntity {
         tags: res.tags.unwrap(),
         description: res.description.unwrap(),
         url: res.url.unwrap(),
+        discord_name_tag: res.discord_name_tag.unwrap(),
     }
 }

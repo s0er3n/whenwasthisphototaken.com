@@ -23,7 +23,9 @@ static MIN_YEAR: f64 = 1900.;
 static MAX_YEAR: f64 = 2023.;
 
 fn calculate_score(real_year: f64, guessed_year: f64) -> f64 {
-    5000.0 * f64::exp(-f64::abs(real_year - guessed_year) as f64 / (MAX_YEAR - MIN_YEAR) as f64)
+    let diff = f64::abs(real_year - guessed_year);
+    let decay = f64::exp(-diff / ((MAX_YEAR - MIN_YEAR) / 2.0)); // add exponential decay term
+    5000.0 * decay * f64::exp(-diff / (MAX_YEAR - MIN_YEAR))
 }
 fn combine_hash_maps(maps: &Vec<HashMap<String, f64>>) -> Vec<(String, f64)> {
     let mut result = HashMap::new();

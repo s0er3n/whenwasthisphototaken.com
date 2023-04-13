@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
-use actix::{Actor, Context, Handler};
+use actix::{Actor, Addr, Context, Handler};
 
 use crate::{game::Game, twitch::TwitchMessage};
 
 pub struct Server {
-    games: HashMap<String, Game>,
+    games: HashMap<String, Addr<Game>>,
 }
 
 impl Default for Server {
@@ -24,6 +24,11 @@ impl Handler<TwitchMessage> for Server {
     type Result = ();
 
     fn handle(&mut self, msg: TwitchMessage, ctx: &mut Self::Context) -> Self::Result {
-        dbg!(msg.0);
+        if let twitch_irc::message::ServerMessage::Privmsg(msg) = msg.0 {
+            if let Some(game) = self.games.get(&msg.channel_login) {
+                todo!("send sender and msg to game for it to handle");
+                // game.do_send();
+            }
+        }
     }
 }

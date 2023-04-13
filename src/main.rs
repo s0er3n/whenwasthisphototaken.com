@@ -27,7 +27,7 @@ async fn main() -> std::io::Result<()> {
     twitch_guy_address.do_send(Channel::Join("soeren_______".into()));
 
     HttpServer::new(|| App::new().route("/ws/", web::get().to(index)))
-        .bind(("127.0.0.1", 8080))?
+        .bind(("0.0.0.0", 8000))?
         .run()
         .await
 }

@@ -8,13 +8,13 @@ use twitch_irc::{
 
 use crate::server::Server;
 
-pub struct TwitchMessage(ServerMessage);
+pub struct TwitchMessage(pub ServerMessage);
 
 impl Message for TwitchMessage {
     type Result = ();
 }
 
-enum Channel {
+pub enum Channel {
     Join(String),
     Leave(String),
 }
@@ -40,7 +40,7 @@ impl Handler<Channel> for TwitchGuy {
 }
 
 impl TwitchGuy {
-    fn new(server_address: Addr<Server>) -> Self {
+    pub fn new(server_address: Addr<Server>) -> Self {
         let config = ClientConfig::default();
         let (mut incoming_messages, client) =
             TwitchIRCClient::<SecureTCPTransport, StaticLoginCredentials>::new(config);

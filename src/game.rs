@@ -79,7 +79,7 @@ impl Image {
         }
     }
     fn create_vec_guesses(&self) -> Vec<u16> {
-        // 123 years
+        // there are 123 years
         let mut res = vec![0; 124];
 
         for guess in self.guesses.values() {

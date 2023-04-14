@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use actix::{Actor, Context, Handler, Message};
 
+use twitch_irc::message::PrivmsgMessage;
+
 enum GameState {
     Image,
     AfterImage,
@@ -26,7 +28,7 @@ impl Actor for Game {
     type Context = Context<Self>;
 }
 
-struct TwitchMsg {
+pub struct TwitchMsg {
     msg: String,
     author: String,
     author_id: String,
@@ -34,6 +36,16 @@ struct TwitchMsg {
 
 impl Message for TwitchMsg {
     type Result = ();
+}
+
+impl From<PrivmsgMessage> for TwitchMsg {
+    fn from(msg: PrivmsgMessage) -> Self {
+        Self {
+            msg: msg.message_text,
+            author: msg.sender.name,
+            author_id: msg.sender.id,
+        }
+    }
 }
 
 impl Handler<TwitchMsg> for Game {

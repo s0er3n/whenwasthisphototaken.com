@@ -36,6 +36,7 @@ impl Handler<Channel> for TwitchGuy {
             Channel::Join(channel) => self.client.join(channel),
             Channel::Leave(channel) => todo!(),
         };
+        ()
     }
 }
 

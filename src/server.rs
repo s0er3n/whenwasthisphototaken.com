@@ -2,7 +2,11 @@ use std::collections::HashMap;
 
 use actix::{Actor, Addr, Context, Handler};
 
-use crate::{game::Game, twitch::TwitchMessage};
+use crate::{
+    game::{Game, TwitchMsg},
+    twitch::TwitchMessage,
+};
+
 
 pub struct Server {
     games: HashMap<String, Addr<Game>>,
@@ -26,8 +30,7 @@ impl Handler<TwitchMessage> for Server {
     fn handle(&mut self, msg: TwitchMessage, ctx: &mut Self::Context) -> Self::Result {
         if let twitch_irc::message::ServerMessage::Privmsg(msg) = msg.0 {
             if let Some(game) = self.games.get(&msg.channel_login) {
-                todo!("send sender and msg to game for it to handle");
-                // game.do_send();
+                game.do_send(TwitchMsg::from(msg));
             }
         }
     }

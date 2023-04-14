@@ -1,13 +1,24 @@
-use actix::{Actor, Handler, Message, StreamHandler};
+use actix::{Actor, Addr, AsyncContext, Handler, Message, StreamHandler};
 use actix_web_actors::ws;
 use anyhow::Result;
 use serde::Serialize;
 
+use crate::message_broker::{Broker, MessageBroker};
+
 /// Define HTTP actor
-pub struct WebsocketGuy;
+pub struct WebsocketGuy {
+    pub broker_addr: Addr<MessageBroker>,
+}
 
 impl Actor for WebsocketGuy {
     type Context = ws::WebsocketContext<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        self.broker_addr.do_send(Broker::Subscribe {
+            channel: "soeren_______".into(),
+            ws: ctx.address(),
+        })
+    }
 }
 
 #[derive(Serialize)]

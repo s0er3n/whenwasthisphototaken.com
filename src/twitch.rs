@@ -24,7 +24,6 @@ impl Message for Channel {
 }
 
 pub struct TwitchGuy {
-    // not used yet but maybe later for sending messages
     client: TwitchIRCClient<TCPTransport<TLS>, StaticLoginCredentials>,
 }
 

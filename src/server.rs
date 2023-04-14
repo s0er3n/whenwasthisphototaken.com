@@ -5,7 +5,7 @@ use actix::{Actor, Addr, Context, Handler};
 use crate::{
     game::{Game, TwitchMsg},
     message_broker::MessageBroker,
-    twitch::TwitchMessage,
+    twitch::{Channel, TwitchMessage},
 };
 
 pub struct Server {
@@ -24,6 +24,22 @@ impl Server {
 
 impl Actor for Server {
     type Context = Context<Self>;
+}
+
+impl Handler<Channel> for Server {
+    type Result = ();
+
+    fn handle(&mut self, msg: Channel, ctx: &mut Self::Context) -> Self::Result {
+        match msg {
+            Channel::Join(channel) => {
+                if let None = self.games.get(&channel) {
+                    let game = Game::new(self.broker_addr.clone(), channel.clone()).start();
+                    self.games.insert(channel.clone(), game.clone());
+                }
+            }
+            Channel::Leave(_) => todo!(),
+        };
+    }
 }
 
 impl Handler<TwitchMessage> for Server {

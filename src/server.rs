@@ -4,17 +4,20 @@ use actix::{Actor, Addr, Context, Handler};
 
 use crate::{
     game::{Game, TwitchMsg},
+    message_broker::MessageBroker,
     twitch::TwitchMessage,
 };
 
 pub struct Server {
     games: HashMap<String, Addr<Game>>,
+    broker_addr: Addr<MessageBroker>,
 }
 
-impl Default for Server {
-    fn default() -> Self {
+impl Server {
+    pub fn new(broker_addr: Addr<MessageBroker>) -> Self {
         Server {
             games: HashMap::new(),
+            broker_addr,
         }
     }
 }
@@ -31,7 +34,7 @@ impl Handler<TwitchMessage> for Server {
             if let Some(game) = self.games.get(&msg.channel_login) {
                 game.do_send(TwitchMsg::from(msg));
             } else {
-                let game = Game::default().start();
+                let game = Game::new(self.broker_addr.clone(), msg.channel_login.clone()).start();
                 self.games.insert(msg.channel_login.clone(), game.clone());
                 game.do_send(TwitchMsg::from(msg));
             }

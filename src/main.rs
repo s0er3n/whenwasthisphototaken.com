@@ -23,20 +23,19 @@ async fn index(req: HttpRequest, stream: web::Payload) -> Result<HttpResponse, E
         &req,
         stream,
     );
-    println!("{:?}", resp);
     resp
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let server_address = Server::default().start();
+    let massage_broker_address = message_broker::MessageBroker::default().start();
+
+    let server_address = Server::new(massage_broker_address.clone()).start();
 
     let twitch_guy_address = TwitchGuy::new(server_address).start();
 
     // joining hardcoded for now
     twitch_guy_address.do_send(Channel::Join("soeren_______".into()));
-
-    let massage_broker_address = message_broker::MessageBroker::default().start();
 
     HttpServer::new(move || {
         App::new()

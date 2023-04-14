@@ -1,11 +1,13 @@
 use std::{collections::HashMap, fs};
 
-use actix::{Actor, Context, Handler, Message};
+use actix::{Actor, Addr, Context, Handler, Message};
 
 use rand::Rng;
 use regex::Regex;
 use serde::Serialize;
 use twitch_irc::message::PrivmsgMessage;
+
+use crate::message_broker::{BrokerMessage, MessageBroker};
 
 static MIN_YEAR: f64 = 1900.;
 static MAX_YEAR: f64 = 2023.;
@@ -112,11 +114,12 @@ pub struct Game {
     state: GameState,
     images: Vec<Image>,
     round_number: u8,
+    broker_addr: Addr<MessageBroker>,
 }
 
-impl Default for Game {
-    fn default() -> Self {
-        Self {
+impl Game {
+    pub fn new(broker_addr: Addr<MessageBroker>, channel: String) -> Self {
+        let new = Self {
             images: vec![
                 Image::random_image(),
                 Image::random_image(),
@@ -126,7 +129,13 @@ impl Default for Game {
             ],
             state: GameState::Image,
             round_number: 0,
-        }
+            broker_addr,
+        };
+        new.broker_addr.do_send(BrokerMessage {
+            payload: new.to_message(),
+            channel,
+        });
+        new
     }
 }
 
@@ -143,7 +152,19 @@ impl Game {
         }
     }
 
-    fn next(&mut self) -> Option<Self> {
+    fn reset(&mut self) {
+        self.round_number = 0;
+        self.images = vec![
+            Image::random_image(),
+            Image::random_image(),
+            Image::random_image(),
+            Image::random_image(),
+            Image::random_image(),
+        ];
+        self.state = GameState::Image;
+    }
+
+    fn next(&mut self) {
         match self.state {
             GameState::AfterImage => match self.images.get(self.round_number as usize + 1) {
                 Some(_) => {
@@ -157,10 +178,8 @@ impl Game {
             GameState::Image => {
                 self.state = GameState::AfterImage;
             }
-            // FIXME: this will probably not work we want to keep the same actor (game) alive
-            GameState::Results => return Some(Self::default()),
-        }
-        None
+            GameState::Results => self.reset(),
+        };
     }
 
     fn to_message(&self) -> String {
@@ -208,6 +227,7 @@ pub struct TwitchMsg {
     msg: String,
     author: String,
     author_id: String,
+    channel: String,
 }
 
 impl Message for TwitchMsg {
@@ -232,6 +252,7 @@ impl From<PrivmsgMessage> for TwitchMsg {
             msg: msg.message_text,
             author: msg.sender.name,
             author_id: msg.sender.id,
+            channel: msg.channel_login,
         }
     }
 }
@@ -240,18 +261,22 @@ impl Handler<TwitchMsg> for Game {
     type Result = ();
 
     fn handle(&mut self, msg: TwitchMsg, ctx: &mut Self::Context) -> Self::Result {
+        if msg.channel == msg.author.to_lowercase() && msg.msg.starts_with("!next") {
+            self.next();
+            self.broker_addr.do_send(BrokerMessage {
+                channel: msg.channel,
+                payload: self.to_message(),
+            });
+            return ();
+        }
         if let Some(year) = msg.find_year() {
-            // TODO: use id later/ create our own ids so we can support other platforms not only twitch
             {
                 let _ = self.add_guess(msg.author, year);
-                println!("{:?}", self.to_message());
+                self.broker_addr.do_send(BrokerMessage {
+                    channel: msg.channel,
+                    payload: self.to_message(),
+                });
             }
         };
-
-        // FIXME: CHECK FOR HOST!!!
-        if msg.msg.starts_with("!next") {
-            self.next();
-            println!("{:?}", self.to_message());
-        }
     }
 }

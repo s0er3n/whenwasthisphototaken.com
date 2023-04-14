@@ -269,7 +269,7 @@ impl Handler<TwitchMsg> for Game {
             });
             return ();
         }
-        if let Some(year) = msg.find_year() {
+        if let (&GameState::Image, Some(year)) = (&self.state, msg.find_year()) {
             {
                 let _ = self.add_guess(msg.author, year);
                 self.broker_addr.do_send(BrokerMessage {

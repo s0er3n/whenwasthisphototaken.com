@@ -1,13 +1,13 @@
 use actix::{Actor, Addr, AsyncContext, Handler, Message, StreamHandler};
 use actix_web_actors::ws;
 use anyhow::Result;
-use serde::Serialize;
 
 use crate::message_broker::{Broker, MessageBroker};
 
 /// Define HTTP actor
 pub struct WebsocketGuy {
     pub broker_addr: Addr<MessageBroker>,
+    pub channel: String,
 }
 
 impl Actor for WebsocketGuy {
@@ -15,7 +15,7 @@ impl Actor for WebsocketGuy {
 
     fn started(&mut self, ctx: &mut Self::Context) {
         self.broker_addr.do_send(Broker::Subscribe {
-            channel: "soeren_______".into(),
+            channel: self.channel.clone().into(),
             ws: ctx.address(),
         })
     }

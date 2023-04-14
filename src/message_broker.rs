@@ -46,6 +46,7 @@ impl MessageBroker {
     }
 
     fn distribute_message(&mut self, msg: BrokerMessage) {
+        dbg!(&msg);
         self.last_message
             .insert(msg.channel.clone(), msg.payload.clone());
         if let Some(subcribers) = self.subscribers.get(&msg.channel) {
@@ -56,6 +57,7 @@ impl MessageBroker {
     }
 }
 
+#[derive(Debug)]
 pub struct BrokerMessage {
     pub channel: String,
     pub payload: String,

@@ -21,20 +21,17 @@ impl Actor for WebsocketGuy {
     }
 }
 
-#[derive(Serialize)]
-enum State {
-    Test,
-}
+pub struct Payload(pub String);
 
-impl Message for State {
+impl Message for Payload {
     type Result = Result<()>;
 }
 
-impl Handler<State> for WebsocketGuy {
+impl Handler<Payload> for WebsocketGuy {
     type Result = Result<()>;
 
-    fn handle(&mut self, msg: State, ctx: &mut Self::Context) -> Self::Result {
-        ctx.text(serde_json::to_string(&msg)?);
+    fn handle(&mut self, msg: Payload, ctx: &mut Self::Context) -> Self::Result {
+        ctx.text(msg.0);
         Ok(())
     }
 }

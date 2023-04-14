@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use actix::{Actor, Addr, Context, Handler, Message};
 
-use crate::websocket::WebsocketGuy;
+use crate::websocket::{Payload, WebsocketGuy};
 
 pub struct MessageBroker {
     subscribers: HashMap<String, Vec<Addr<WebsocketGuy>>>,
@@ -33,6 +33,30 @@ impl MessageBroker {
             .entry(channel)
             .or_insert_with(Vec::new)
             .push(addr);
+    }
+
+    fn distribute_message(&self, msg: BrokerMessage) {
+        if let Some(subcribers) = self.subscribers.get(&msg.channel) {
+            subcribers.iter().for_each(|subscriber| {
+                subscriber.do_send(Payload(msg.payload.clone()));
+            })
+        }
+    }
+}
+
+struct BrokerMessage {
+    channel: String,
+    payload: String,
+}
+
+impl Message for BrokerMessage {
+    type Result = ();
+}
+
+impl Handler<BrokerMessage> for MessageBroker {
+    type Result = ();
+    fn handle(&mut self, msg: BrokerMessage, _: &mut Self::Context) -> Self::Result {
+        self.distribute_message(msg);
     }
 }
 

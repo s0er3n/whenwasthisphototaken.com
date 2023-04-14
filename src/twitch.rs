@@ -32,7 +32,7 @@ impl Handler<Channel> for TwitchGuy {
 
     fn handle(&mut self, msg: Channel, ctx: &mut Self::Context) -> Self::Result {
         match msg {
-            Channel::Join(channel) => self.client.join(channel),
+            Channel::Join(channel) => self.client.join(channel.to_lowercase()),
             Channel::Leave(channel) => todo!(),
         };
         ()

@@ -157,6 +157,7 @@ impl Game {
             GameState::Image => {
                 self.state = GameState::AfterImage;
             }
+            // FIXME: this will probably not work we want to keep the same actor (game) alive
             GameState::Results => return Some(Self::default()),
         }
         None
@@ -215,9 +216,11 @@ impl Message for TwitchMsg {
 
 impl TwitchMsg {
     fn find_year(&self) -> Option<u16> {
-        let re = Regex::new(r"/\b(19\d{2}|20[0|1]\d|202[0-2])\b/gm").unwrap();
+        let re = Regex::new(r"\b(19\d{2}|20[0|1]\d|202[0-2])\b").unwrap();
         if let Some(cap) = re.captures(&self.msg) {
+            dbg!(&cap);
             if let Some(year) = cap.get(0) {
+                dbg!(&year);
                 return year.as_str().parse::<u16>().ok();
             }
         }
@@ -238,5 +241,19 @@ impl From<PrivmsgMessage> for TwitchMsg {
 impl Handler<TwitchMsg> for Game {
     type Result = ();
 
-    fn handle(&mut self, msg: TwitchMsg, ctx: &mut Self::Context) -> Self::Result {}
+    fn handle(&mut self, msg: TwitchMsg, ctx: &mut Self::Context) -> Self::Result {
+        if let Some(year) = msg.find_year() {
+            // TODO: use id later/ create our own ids so we can support other platforms not only twitch
+            {
+                let _ = self.add_guess(msg.author, year);
+                println!("{:?}", self.to_message());
+            }
+        };
+
+        // FIXME: CHECK FOR HOST!!!
+        if msg.msg.starts_with("!next") {
+            self.next();
+            println!("{:?}", self.to_message());
+        }
+    }
 }

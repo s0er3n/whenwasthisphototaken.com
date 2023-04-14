@@ -7,7 +7,6 @@ use crate::{
     twitch::TwitchMessage,
 };
 
-
 pub struct Server {
     games: HashMap<String, Addr<Game>>,
 }
@@ -30,6 +29,10 @@ impl Handler<TwitchMessage> for Server {
     fn handle(&mut self, msg: TwitchMessage, ctx: &mut Self::Context) -> Self::Result {
         if let twitch_irc::message::ServerMessage::Privmsg(msg) = msg.0 {
             if let Some(game) = self.games.get(&msg.channel_login) {
+                game.do_send(TwitchMsg::from(msg));
+            } else {
+                let game = Game::default().start();
+                self.games.insert(msg.channel_login.clone(), game.clone());
                 game.do_send(TwitchMsg::from(msg));
             }
         }

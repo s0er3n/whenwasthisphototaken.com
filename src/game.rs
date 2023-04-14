@@ -218,9 +218,7 @@ impl TwitchMsg {
     fn find_year(&self) -> Option<u16> {
         let re = Regex::new(r"\b(19\d{2}|20[0|1]\d|202[0-2])\b").unwrap();
         if let Some(cap) = re.captures(&self.msg) {
-            dbg!(&cap);
             if let Some(year) = cap.get(0) {
-                dbg!(&year);
                 return year.as_str().parse::<u16>().ok();
             }
         }

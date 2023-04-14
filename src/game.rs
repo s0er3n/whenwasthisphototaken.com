@@ -269,6 +269,12 @@ impl Handler<TwitchMsg> for Game {
             });
             return ();
         }
+        if msg.msg.starts_with("!random") {
+            let mut rng = rand::thread_rng();
+            let random_year: u16 = rng.gen_range(1900..2023);
+            let _ = self.add_guess(msg.author, random_year);
+            return;
+        }
         if let (&GameState::Image, Some(year)) = (&self.state, msg.find_year()) {
             {
                 let _ = self.add_guess(msg.author, year);

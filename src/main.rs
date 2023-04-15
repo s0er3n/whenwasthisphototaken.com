@@ -66,7 +66,7 @@ async fn main() -> std::io::Result<()> {
     };
 
     HttpServer::new(move || App::new().app_data(app_data.clone()).service(index))
-        .bind(("0.0.0.0", 8000))?
+        .bind(("0.0.0.0", 3030))?
         .run()
         .await
 }

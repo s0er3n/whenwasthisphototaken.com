@@ -9,13 +9,22 @@ use twitch_irc::message::PrivmsgMessage;
 
 use crate::message_broker::{BrokerMessage, MessageBroker};
 
+use std::i32;
+
 static MIN_YEAR: f64 = 1900.;
 static MAX_YEAR: f64 = 2023.;
 
-fn calculate_score(real_year: f64, guessed_year: f64) -> f64 {
-    let diff = f64::abs(real_year - guessed_year);
-    let decay = f64::exp(-diff / ((MAX_YEAR - MIN_YEAR) * 2.0)); // add exponential decay term
-    5000.0 * decay * f64::exp(-diff / (MAX_YEAR - MIN_YEAR))
+fn calculate_score(real_year: i32, guessed_year: i32) -> f64 {
+    let diff = i32::abs(real_year - guessed_year);
+
+    let formula_one = 5000 - 2 * diff.pow(2);
+    let formula_two = 2 * (50 - diff).pow(2);
+    let result = (formula_one as f64 * 1.25 + formula_two as f64 * 0.75) / 2.0;
+    if result > 0. {
+        result
+    } else {
+        0.
+    }
 }
 
 fn combine_hash_maps(maps: &Vec<HashMap<String, f64>>) -> Vec<(String, f64)> {

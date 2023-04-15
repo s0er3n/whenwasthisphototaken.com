@@ -1,3 +1,2 @@
 [phases.build]
-aptPkgs = ["...", "libssl-dev"]   # Install the wget package with apt-get
-nixPkgs = ["...", "openssl"]   
+aptPkgs = ["...", "librust-openssl-sys-dev"]

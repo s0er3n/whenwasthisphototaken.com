@@ -47,7 +47,7 @@ enum StateMsg {
         result: u16,
         pos: usize,
         len: usize,
-        scores: Vec<(String, f64)>,
+        scores: Vec<(String, u16, f64)>,
         // TODO: add scoreboard or winners
     },
     Results {
@@ -65,10 +65,10 @@ struct Image {
     url: String,
     result: u16,
     description: String,
-    // string -> sender
     guesses: HashMap<String, u16>,
     scores: HashMap<String, f64>,
 }
+
 impl Image {
     fn random_image() -> Self {
         let (result, url) = get_random_image();
@@ -199,6 +199,17 @@ impl Game {
                     .scores
                     .clone()
                     .into_iter()
+                    .map(|(key, value)| {
+                        return (
+                            key.clone(),
+                            self.images[self.round_number as usize]
+                                .guesses
+                                .get(&key)
+                                .unwrap()
+                                .clone(),
+                            value.clone(),
+                        );
+                    })
                     // TODO: sort
                     .collect(),
                 pos: self.round_number as usize + 1,

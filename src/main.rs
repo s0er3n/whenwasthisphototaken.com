@@ -7,23 +7,29 @@ mod websocket;
 use actix::{Actor, Addr};
 use actix_web::{get, web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_web_actors::ws;
+use serde::Deserialize;
 use server::Server;
 use twitch::{Channel, TwitchGuy};
 
 use crate::{message_broker::MessageBroker, websocket::WebsocketGuy};
 
-#[get("/ws/{channel}")]
+#[derive(Deserialize)]
+struct QueryParameter {
+    room: String,
+}
+
+#[get("/ws")]
 async fn index(
     req: HttpRequest,
     stream: web::Payload,
-    path: web::Path<String>,
+    query: web::Query<QueryParameter>,
 ) -> Result<HttpResponse, Error> {
     let app_data = req
         .app_data::<AppData>()
         .expect("AppData should always exist i think")
         .clone();
 
-    let channel = path.into_inner();
+    let channel = query.room.clone();
 
     app_data
         .twitch_guy_addr

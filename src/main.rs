@@ -16,9 +16,12 @@ use twitch::{Channel, TwitchGuy};
 
 use crate::{message_broker::MessageBroker, websocket::WebsocketGuy};
 
+use actix_session::storage::CookieSessionStore;
+use actix_session::{Session, SessionMiddleware};
+use actix_web::cookie::Key;
 #[derive(Deserialize)]
 struct QueryParameter {
-    code: String,
+    code: Option<String>,
 }
 
 #[get("/ws")]
@@ -26,7 +29,9 @@ async fn index(
     req: HttpRequest,
     stream: web::Payload,
     query: web::Query<QueryParameter>,
+    session: Session,
 ) -> Result<HttpResponse, Error> {
+
     let app_data = req
         .app_data::<AppData>()
         .expect("AppData should always exist i think")
@@ -34,12 +39,25 @@ async fn index(
 
     let code = query.code.clone();
 
-    let channel: String = match app_data.auth.check_code(code).await {
-        Ok(channel) => channel,
-        Err(err) => {
-            return Err(actix_web::error::ErrorInternalServerError(err.to_string()));
-        }
+
+    let channel: String = 
+    // FIXME: check for cookie age or maybe if user changed channel name
+    if let Ok(Some(channel)) = session.get::<String>("twitch_channel"){
+        channel
+    } else {
+        if code == None {
+            return Ok(actix_web::HttpResponse::TemporaryRedirect().insert_header(("Location", "/login")).finish());
+        };
+        match app_data.auth.check_code(code.expect("i am checking before")).await {
+            Ok(channel) => {
+                session.insert::<String>("twitch_channel", channel.clone())?;
+                channel},
+            Err(err) => {
+                return Ok(actix_web::HttpResponse::TemporaryRedirect().insert_header(("Location", "/login")).finish());
+            }}
     };
+
+
     dbg!(&channel);
 
     app_data
@@ -73,6 +91,8 @@ async fn main() -> std::io::Result<()> {
 
     let auth = Auth::new();
 
+    let secret = Key::generate();
+
     let twitch_guy_addr = TwitchGuy::new(server_addr.clone()).start();
     let app_data = AppData {
         broker_addr,
@@ -81,8 +101,16 @@ async fn main() -> std::io::Result<()> {
         auth,
     };
 
-    HttpServer::new(move || App::new().app_data(app_data.clone()).service(index))
-        .bind(("0.0.0.0", 3030))?
-        .run()
-        .await
+    HttpServer::new(move || {
+        App::new()
+            .wrap(SessionMiddleware::new(
+                CookieSessionStore::default(),
+                secret.clone(),
+            ))
+            .app_data(app_data.clone())
+            .service(index)
+    })
+    .bind(("0.0.0.0", 3030))?
+    .run()
+    .await
 }

@@ -1,3 +1,4 @@
+mod auth;
 mod game;
 mod message_broker;
 mod server;
@@ -7,6 +8,8 @@ mod websocket;
 use actix::{Actor, Addr};
 use actix_web::{get, web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_web_actors::ws;
+use anyhow::Result;
+use auth::Auth;
 use serde::Deserialize;
 use server::Server;
 use twitch::{Channel, TwitchGuy};
@@ -15,7 +18,7 @@ use crate::{message_broker::MessageBroker, websocket::WebsocketGuy};
 
 #[derive(Deserialize)]
 struct QueryParameter {
-    room: String,
+    code: String,
 }
 
 #[get("/ws")]
@@ -29,7 +32,15 @@ async fn index(
         .expect("AppData should always exist i think")
         .clone();
 
-    let channel = query.room.clone();
+    let code = query.code.clone();
+
+    let channel: String = match app_data.auth.check_code(code).await {
+        Ok(channel) => channel,
+        Err(err) => {
+            return Err(actix_web::error::ErrorInternalServerError(err.to_string()));
+        }
+    };
+    dbg!(&channel);
 
     app_data
         .twitch_guy_addr
@@ -38,7 +49,7 @@ async fn index(
     let resp = ws::start(
         WebsocketGuy {
             broker_addr: app_data.broker_addr.clone(),
-            channel: channel,
+            channel,
         },
         &req,
         stream,
@@ -50,19 +61,24 @@ struct AppData {
     broker_addr: Addr<MessageBroker>,
     twitch_guy_addr: Addr<TwitchGuy>,
     server_addr: Addr<Server>,
+    auth: Auth,
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let massage_broker_address = message_broker::MessageBroker::default().start();
+    dotenv::dotenv().ok();
+    let broker_addr = message_broker::MessageBroker::default().start();
 
-    let server_address = Server::new(massage_broker_address.clone()).start();
+    let server_addr = Server::new(broker_addr.clone()).start();
 
-    let twitch_guy_address = TwitchGuy::new(server_address.clone()).start();
+    let auth = Auth::new();
+
+    let twitch_guy_addr = TwitchGuy::new(server_addr.clone()).start();
     let app_data = AppData {
-        broker_addr: massage_broker_address,
-        twitch_guy_addr: twitch_guy_address,
-        server_addr: server_address,
+        broker_addr,
+        twitch_guy_addr,
+        server_addr,
+        auth,
     };
 
     HttpServer::new(move || App::new().app_data(app_data.clone()).service(index))

@@ -73,7 +73,7 @@ impl Auth {
         if res.status() == 200 {
             let res: Token = serde_json::from_str(&res.text().await?)?;
             let user_res = client
-                .get("https://api.twitch.tv/helix/users?id=141981764")
+                .get("https://api.twitch.tv/helix/users")
                 .header("Authorization", format!("Bearer {}", res.access_token))
                 .header("Client-Id", self.client_id.clone())
                 .send()

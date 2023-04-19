@@ -4,10 +4,13 @@ use actix_web::http::header::HeaderMap;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::database::DataBase;
+
 #[derive(Clone)]
 pub struct Auth {
     client_id: String,
     client_secret: String,
+    db: DataBase,
 }
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -80,15 +83,18 @@ impl Auth {
                 .await?;
             if user_res.status() == 200 {
                 let users: UsersData = serde_json::from_str(&user_res.text().await?)?;
-                return Ok(users.data.first().context("no user")?.login.clone());
+                let user = users.data.first().context("no user")?;
+                dbg!(self.db.insert_user(user.clone()).await);
+                return Ok(user.login.clone());
             }
         };
 
         bail!("could not be authenticated")
     }
 
-    pub fn new() -> Self {
+    pub fn new(db: DataBase) -> Self {
         Self {
+            db,
             client_id: env::var("CLIENT_ID").expect("CLIENT_ID Missing"),
             client_secret: env::var("CLIENT_SECRET").expect("CLIENT_SECRET Missing"),
         }

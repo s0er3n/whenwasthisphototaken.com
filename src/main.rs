@@ -4,12 +4,14 @@ mod message_broker;
 mod server;
 mod twitch;
 mod websocket;
+mod database;
 
 use actix::{Actor, Addr};
 use actix_web::{get, web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_web_actors::ws;
 use anyhow::Result;
 use auth::Auth;
+use database::DataBase;
 use serde::Deserialize;
 use server::Server;
 use twitch::{Channel, TwitchGuy};
@@ -80,6 +82,7 @@ struct AppData {
     twitch_guy_addr: Addr<TwitchGuy>,
     server_addr: Addr<Server>,
     auth: Auth,
+    db: DataBase,
 }
 
 #[actix_web::main]
@@ -89,17 +92,23 @@ async fn main() -> std::io::Result<()> {
 
     let server_addr = Server::new(broker_addr.clone()).start();
 
-    let auth = Auth::new();
 
     let secret = Key::generate();
 
     let twitch_guy_addr = TwitchGuy::new(server_addr.clone()).start();
+
+    let db = DataBase::new().await;
+
+    let auth = Auth::new(db.clone());
+
     let app_data = AppData {
         broker_addr,
         twitch_guy_addr,
         server_addr,
         auth,
+        db
     };
+
 
     HttpServer::new(move || {
         App::new()

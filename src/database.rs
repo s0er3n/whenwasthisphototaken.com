@@ -39,6 +39,7 @@ pub struct Image {
     description: String,
     year: i32,
     user_id: sqlx::types::Uuid,
+    country: Strin,
 }
 
 impl Image {
@@ -47,6 +48,7 @@ impl Image {
             // TODO: expensive clone i think
             image: value.files.first().expect("idk").data.clone().into(),
             tags: value.tags.to_string(),
+            country: value.country.to_string(),
             description: value.description.to_string(),
             year: value.year.to_owned() as i32,
             user_id: Uuid::from_str(&id).expect("should always be uuid"),
@@ -83,12 +85,13 @@ impl DataBase {
 
     pub async fn insert_image(&self, image: Image) -> Result<PgQueryResult, sqlx::Error> {
         sqlx::query!(
-            r#"INSERT INTO "image" (id,image, tags, description, year, user_id, approved) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, FALSE)"#,
+            r#"INSERT INTO "image" (id,image, tags, description, year, user_id, country, approved) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6,  FALSE)"#,
             image.image,
             image.tags,
             image.description,
             image.year,
             image.user_id
+            image.country
         )
         .execute(&self.pool)
         .await

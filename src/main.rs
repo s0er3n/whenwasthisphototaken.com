@@ -125,6 +125,7 @@ pub struct ImageForm {
     #[multipart(limit = "128 MiB", rename = "image")]
     pub files: Vec<bytes::Bytes>,
     pub year: Text<u16>,
+    pub country: Text<String>,
 }
 #[post("/image")]
 async fn add_image(

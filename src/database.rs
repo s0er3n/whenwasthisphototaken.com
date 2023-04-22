@@ -39,7 +39,7 @@ pub struct Image {
     description: String,
     year: i32,
     user_id: sqlx::types::Uuid,
-    country: Strin,
+    country: String,
 }
 
 impl Image {
@@ -90,7 +90,7 @@ impl DataBase {
             image.tags,
             image.description,
             image.year,
-            image.user_id
+            image.user_id,
             image.country
         )
         .execute(&self.pool)

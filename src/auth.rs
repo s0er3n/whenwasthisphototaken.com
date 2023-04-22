@@ -1,6 +1,5 @@
 use std::env;
 
-use actix_web::http::header::HeaderMap;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
@@ -53,8 +52,13 @@ pub struct User {
     pub created_at: String,
 }
 
+pub struct SessionData {
+    pub channel: String,
+    pub id: String,
+}
+
 impl Auth {
-    pub async fn check_code(&self, code: String) -> Result<String> {
+    pub async fn check_code(&self, code: String) -> Result<SessionData> {
         let client = reqwest::Client::new();
         let client_id = self.client_id.clone();
         let client_secret = self.client_secret.clone();
@@ -84,8 +88,11 @@ impl Auth {
             if user_res.status() == 200 {
                 let users: UsersData = serde_json::from_str(&user_res.text().await?)?;
                 let user = users.data.first().context("no user")?;
-                dbg!(self.db.insert_user(user.clone()).await);
-                return Ok(user.login.clone());
+                let id = self.db.insert_user(user.clone()).await?;
+                return Ok(SessionData {
+                    channel: user.login.clone(),
+                    id,
+                });
             }
         };
 

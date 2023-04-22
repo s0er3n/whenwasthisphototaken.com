@@ -1,11 +1,12 @@
-use std::env;
+use std::{env, str::FromStr};
 
 use sqlx::{
     postgres::{PgPoolOptions, PgQueryResult},
+    types::Uuid,
     Pool, Postgres,
 };
 
-use crate::auth::User;
+use crate::{auth::User, ImageForm};
 
 #[derive(Clone)]
 pub struct DataBase {
@@ -32,13 +33,25 @@ impl From<User> for UserDB {
     }
 }
 #[derive(sqlx::FromRow)]
-struct Image {
+pub struct Image {
     image: Vec<u8>,
     tags: String,
     description: String,
     year: i32,
     user_id: sqlx::types::Uuid,
-    approved: bool,
+}
+
+impl Image {
+    pub fn from_form(value: ImageForm, id: String) -> Self {
+        Image {
+            // TODO: expensive clone i think
+            image: value.files.first().expect("idk").data.clone().into(),
+            tags: value.tags.to_string(),
+            description: value.description.to_string(),
+            year: value.year.to_owned() as i32,
+            user_id: Uuid::from_str(&id).expect("should always be uuid"),
+        }
+    }
 }
 
 impl DataBase {
@@ -51,18 +64,21 @@ impl DataBase {
             .expect("db connection to work");
         Self { pool }
     }
-    pub async fn insert_user(&self, user: User) -> Result<PgQueryResult, sqlx::Error> {
+    pub async fn insert_user(&self, user: User) -> anyhow::Result<String> {
         let user: UserDB = user.into();
         // FIXME: this should also upsert
-        sqlx::query!(
-            r#"INSERT INTO "user" (id,name, provider, provider_id, pfp) VALUES (gen_random_uuid(), $1, $2, $3, $4)"#,
+        let result = sqlx::query!(
+            r#"INSERT INTO "user" (id, name, provider, provider_id, pfp) VALUES (gen_random_uuid(), $1, $2, $3, $4)
+            ON CONFLICT (provider_id) DO UPDATE SET name = excluded.name, pfp = excluded.pfp
+            RETURNING id"#,
             user.name,
             user.provider,
             format!("{}:{}",user.provider,user.provider_id),
             user.pfp
         )
-        .execute(&self.pool)
-        .await
+        .fetch_one(&self.pool)
+        .await;
+        Ok(result?.id.to_string())
     }
 
     pub async fn insert_image(&self, image: Image) -> Result<PgQueryResult, sqlx::Error> {
@@ -76,5 +92,16 @@ impl DataBase {
         )
         .execute(&self.pool)
         .await
+    }
+    pub async fn get_image_bytes_by_id(&self, id: &str) -> anyhow::Result<Option<Vec<u8>>> {
+        let id = Uuid::from_str(&id)?;
+        let result = sqlx::query!(r#"SELECT image FROM "image" WHERE id = $1"#, id)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        match result {
+            Some(row) => Ok(Some(row.image)),
+            None => Ok(None),
+        }
     }
 }

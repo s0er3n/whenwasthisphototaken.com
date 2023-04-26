@@ -293,6 +293,10 @@ impl Handler<TwitchMsg> for Game {
             let mut rng = rand::thread_rng();
             let random_year: u16 = rng.gen_range(1900..2023);
             let _ = self.add_guess(msg.author, random_year);
+            self.broker_addr.do_send(BrokerMessage {
+                channel: msg.channel,
+                payload: self.to_message(),
+            });
             return;
         }
         if let (&GameState::Image, Some(year)) = (&self.state, msg.find_year()) {
